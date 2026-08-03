@@ -824,6 +824,15 @@ fn deduplicate_options(config: &mut Value) -> GeneratorResult<usize> {
         .as_array_mut()
         .ok_or_else(|| "Generated config has no DC options array".to_string())?;
     let previous_count = options.len();
+
+    // 去重前再次规范化 IP。Telegram 返回的 help.getConfig 有时会把 IPv6
+    // 写成展开格式，避免同一个地址因为字符串不同导致重复保留。
+    for option in options.iter_mut() {
+        if let Some(ip) = option["ip"].as_str() {
+            option["ip"] = Value::String(normalize_ip(ip));
+        }
+    }
+
     let mut seen = HashSet::new();
     options.retain(|option| {
         let key = (
@@ -1420,6 +1429,9 @@ fn run() -> GeneratorResult<()> {
             last_error.unwrap_or_else(|| "no endpoints".into())
         )
     })?;
+
+    // 获取到 Telegram 原始配置后立即压缩 IPv6，后续合并和去重统一使用标准格式。
+    compact_ipv6_json(&mut config);
 
     let backup_endpoints = match fetch_backup_endpoints() {
         Ok(endpoints) => {
