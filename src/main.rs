@@ -12,7 +12,7 @@ use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::io::{Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::{IpAddr, Ipv6Addr, TcpStream, ToSocketAddrs};
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -540,6 +540,24 @@ struct BackupEndpoint {
     secret: Option<Vec<u8>>,
 }
 
+
+fn normalize_ipv6(ip: &str) -> String {
+    // Telegram 配置里的 IPv6 可能存在 0000 展开形式，
+    // 输出统一为 RFC 5952 风格，避免重复 endpoint。
+    if let Ok(addr) = ip.parse::<Ipv6Addr>() {
+        return addr.to_string();
+    }
+    ip.to_lowercase()
+}
+
+fn normalize_ip(ip: &str) -> String {
+    match ip.parse::<IpAddr>() {
+        Ok(IpAddr::V6(addr)) => addr.to_string(),
+        Ok(IpAddr::V4(addr)) => addr.to_string(),
+        Err(_) => normalize_ipv6(ip),
+    }
+}
+
 fn ipv4_string(value: u32) -> String {
     format!(
         "{}.{}.{}.{}",
@@ -757,6 +775,7 @@ fn merge_endpoint(
     port: u16,
     secret: Option<&[u8]>,
 ) -> GeneratorResult<bool> {
+    let ip = normalize_ip(ip);
     let options = config["options"]
         .as_array_mut()
         .ok_or_else(|| "Generated config has no DC options array".to_string())?;
@@ -767,7 +786,7 @@ fn merge_endpoint(
 
     for option in options.iter_mut() {
         if option_i32(option, "id") != Some(dc_id)
-            || option["ip"].as_str() != Some(ip)
+            || option["ip"].as_str() != Some(&ip)
             || option_i32(option, "port") != Some(port as i32)
         {
             continue;
@@ -781,7 +800,7 @@ fn merge_endpoint(
             continue;
         }
         option["flags"] =
-            Value::from(existing_flags | endpoint_flags(ip, encoded_secret.is_some()));
+            Value::from(existing_flags | endpoint_flags(&ip, encoded_secret.is_some()));
         matched = true;
     }
 
@@ -790,7 +809,7 @@ fn merge_endpoint(
             "id": dc_id,
             "ip": ip,
             "port": port,
-            "flags": endpoint_flags(ip, encoded_secret.is_some()),
+            "flags": endpoint_flags(&ip, encoded_secret.is_some()),
         });
         if let Some(secret) = encoded_secret {
             option["secret"] = Value::String(secret);
