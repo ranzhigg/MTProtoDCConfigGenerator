@@ -1327,8 +1327,36 @@ fn print_usage(program: &str) {
     eprintln!("Usage: {program} [output.json|-] [host] [port]");
 }
 
+fn compact_ipv6_json(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            for (key, item) in map.iter_mut() {
+                if key == "ip" {
+                    if let Some(ip) = item.as_str() {
+                        *item = Value::String(normalize_ip(ip));
+                    }
+                } else {
+                    compact_ipv6_json(item);
+                }
+            }
+        }
+        Value::Array(array) => {
+            for item in array.iter_mut() {
+                compact_ipv6_json(item);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn write_output(path: &str, config: &Value) -> GeneratorResult<()> {
-    let mut output = serde_json::to_string_pretty(config)
+    let mut config = config.clone();
+    // 输出前统一压缩 IPv6，例如：
+    // 2001:0b28:f23d:f001:0000:0000:0000:000a
+    // -> 2001:b28:f23d:f001::a
+    compact_ipv6_json(&mut config);
+
+    let mut output = serde_json::to_string_pretty(&config)
         .map_err(|error| format!("Failed to format generated JSON: {error}"))?;
     output.push('\n');
     if path == "-" {
